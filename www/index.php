@@ -1,72 +1,92 @@
 <?php
 session_start();
 
-// --- 1. CONFIGURACIÓN DEL REPO Y UPDATE ---
+// --- 1. CONFIGURACIÓN DEL REPO Y VERSIÓN ---
 $repoPath = '/var/www/html'; 
 $updateAvailable = false;
 $updateMessage = "";
 $updateError = false;
 $localHash = "Unknown";
 
+// A. INTENTO POR API DE GITHUB (Caché de 30 mins para no saturar la API)
+if (!isset($_SESSION['last_version_check']) || (time() - $_SESSION['last_version_check'] > 1800)) {
+    $ch = curl_init("https://api.github.com/repos/davidpm84/pantools/commits/main");
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ["User-Agent: PANTools-Hub"]);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    $response = curl_exec($ch);
+    $ghData = json_decode($response, true);
+    curl_close($ch);
+
+    if (isset($ghData['sha'])) {
+        $_SESSION['remote_hash'] = substr($ghData['sha'], 0, 7);
+        $_SESSION['last_version_check'] = time();
+    }
+}
+
+// B. OBTENER EL HASH LOCAL
 if (is_dir("$repoPath/.git")) {
-    // A. Intentar vía Comando Git (Con corrección de directorio seguro para Docker)
-    exec("cd " . escapeshellarg($repoPath) . " && git config --global --add safe.directory /var/www/html 2>&1");
-    $cmdHash = shell_exec("cd " . escapeshellarg($repoPath) . " && git rev-parse --short HEAD 2>&1");
-    
-    if ($cmdHash && preg_match('/^[a-f0-9]{7}/', trim($cmdHash))) {
-        $localHash = trim($cmdHash);
-    } 
-    // B. PLAN B: Leer los archivos de Git directamente (si el comando falla por permisos)
-    else {
-        $headFile = "$repoPath/.git/HEAD";
-        if (file_exists($headFile)) {
-            $headContent = trim(file_get_contents($headFile));
-            if (strpos($headContent, 'ref:') === 0) {
-                // Es un puntero a una rama (ej: ref: refs/heads/main)
-                $refPath = "$repoPath/.git/" . trim(substr($headContent, 5));
-                if (file_exists($refPath)) {
-                    $localHash = substr(trim(file_get_contents($refPath)), 0, 7);
-                }
-            } else {
-                // Es un hash directo (Detached HEAD)
-                $localHash = substr($headContent, 0, 7);
-            }
-        }
-    }
-
-    // Verificar actualizaciones (solo si tenemos un hash válido)
+    exec("cd $repoPath && git config --global --add safe.directory $repoPath 2>&1");
+    $localHash = trim(shell_exec("cd $repoPath && git rev-parse --short HEAD 2>&1") ?? "Unknown");
+} elseif (file_exists("$repoPath/.version")) {
+    $localHash = trim(file_get_contents("$repoPath/.version"));
+} else {
+    // Si no hay .git ni archivo .version, asume el remoto actual y crea el archivo
+    $localHash = $_SESSION['remote_hash'] ?? "Unknown";
     if ($localHash !== "Unknown") {
-        exec("cd " . escapeshellarg($repoPath) . " && git fetch origin main 2>&1");
-        $remoteHashRaw = shell_exec("cd " . escapeshellarg($repoPath) . " && git rev-parse --short origin/main 2>&1");
-        $remoteHash = trim($remoteHashRaw ?? "");
+        file_put_contents("$repoPath/.version", $localHash);
+    }
+}
 
-        if (!empty($remoteHash) && preg_match('/^[a-f0-9]{7}/', $remoteHash) && $localHash !== $remoteHash) {
-            $updateAvailable = true;
+// C. DETECTAR SI HAY ACTUALIZACIÓN
+if (isset($_SESSION['remote_hash']) && $localHash !== "Unknown" && $localHash !== $_SESSION['remote_hash']) {
+    $updateAvailable = true;
+}
+
+// D. ACCIÓN DE ACTUALIZAR (Descarga directa del tar.gz desde GitHub)
+if (isset($_POST['action']) && $_POST['action'] === 'self_update' && isset($_SESSION['remote_hash'])) {
+    $tarUrl = "https://github.com/davidpm84/pantools/archive/refs/heads/main.tar.gz";
+    $tarFile = "/tmp/pantools_update.tar.gz";
+    $extractPath = "/tmp/pantools_extract";
+
+    // Descargar
+    exec("curl -L -s -o $tarFile " . escapeshellarg($tarUrl));
+    
+    // Descomprimir
+    exec("rm -rf $extractPath && mkdir -p $extractPath");
+    exec("tar -xzf $tarFile -C $extractPath 2>&1", $outTar, $retTar);
+
+    if ($retTar === 0) {
+        // Copiar SOLO el contenido de la carpeta 'www' hacia el contenedor
+        exec("cp -a $extractPath/pantools-main/www/. $repoPath/ 2>&1", $outCp, $retCp);
+
+        if ($retCp === 0) {
+            $localHash = $_SESSION['remote_hash'];
+            file_put_contents("$repoPath/.version", $localHash);
+            $updateMessage = "✅ PANTools successfully updated from GitHub!";
+            $updateAvailable = false;
+            header("Refresh:2"); 
+        } else {
+            $updateError = true;
+            $updateMessage = "❌ Copy failed: " . implode(" ", $outCp);
         }
-    }
-}
-
-// Ejecutar la actualización de PANTools
-if (isset($_POST['action']) && $_POST['action'] === 'self_update') {
-    exec("cd " . escapeshellarg($repoPath) . " && git reset --hard origin/main 2>&1", $updateOut, $updateRet);
-    if ($updateRet === 0) {
-        $updateMessage = "✅ PANTools updated successfully! Reloading...";
-        header("Refresh:2"); 
     } else {
-        $updateMessage = "❌ Update failed: " . implode(" ", $updateOut);
         $updateError = true;
+        $updateMessage = "❌ Unzip failed: " . implode(" ", $outTar);
     }
+
+    // Limpiar temporales
+    exec("rm -rf $tarFile $extractPath");
 }
 
-// --- 2. GESTIÓN DEL TOKEN DE GITHUB (Setup Wizard) ---
-$configFile = __DIR__ . '/.config.json';
+// --- 2. GESTIÓN DEL TOKEN (SETUP WIZARD) ---
+$configFile = $repoPath . '/.config.json';
 $config = file_exists($configFile) ? json_decode(file_get_contents($configFile), true) : [];
 $setupError = "";
 
 // Acción: Guardar Token
 if (isset($_POST['action']) && $_POST['action'] === 'save_setup') {
     $token = trim($_POST['setup_token']);
-    
     $ch = curl_init("https://api.github.com/user");
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, ["User-Agent: PANTools", "Authorization: token $token"]);
@@ -111,12 +131,12 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
     <title>PANTools - SE Hub</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-
+    
     <style>
         :root {
-            --strata-color: #EA212D;
-            --cortex-color: #00C55E;
-            --mgmt-color: #343a40;
+            --strata-color: #EA212D; 
+            --cortex-color: #00C55E; 
+            --mgmt-color: #343a40;   
             --bg-light: #F8F9FA;
         }
         
@@ -135,7 +155,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
         .title-cortex::before { background-color: var(--cortex-color); }
         .title-mgmt::before { background-color: var(--mgmt-color); }
 
-        .tool-card { border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); transition: transform 0.2s; height: 100%; background: white; border: none; }
+        .tool-card { border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); transition: transform 0.2s, box-shadow 0.2s; height: 100%; background: white; border: none; }
         .tool-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px rgba(0,0,0,0.05); }
         
         .card-strata { border-top: 4px solid var(--strata-color); }
@@ -184,7 +204,9 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
     <div class="container">
         <a class="navbar-brand" href="#">
             <span style="border-left: 2px solid #ddd; padding-left: 15px;">PANTools</span>
-            <span class="badge bg-light text-muted border ms-2" style="font-size: 0.6rem;"><?= htmlspecialchars($localHash) ?></span>
+            <span class="badge bg-light text-muted border ms-2" style="font-size: 0.6rem;" title="Current Version">
+                <i class="fas fa-code-branch me-1"></i><?= htmlspecialchars($localHash) ?>
+            </span>
         </a>
         
         <div class="d-flex align-items-center gap-3">
@@ -195,7 +217,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
                 </form>
             <?php else: ?>
                 <span class="badge bg-success text-white"><i class="fas fa-check-circle me-1"></i> GitHub Connected</span>
-                <form method="POST" class="m-0" onsubmit="return confirm('Disconnect GitHub?');">
+                <form method="POST" class="m-0" onsubmit="return confirm('Disconnect GitHub and remove local token?');">
                     <button type="submit" name="action" value="reset_config" class="btn btn-link btn-sm text-danger text-decoration-none p-0"><i class="fas fa-unlink"></i> Disconnect</button>
                 </form>
             <?php endif; ?>
@@ -213,7 +235,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
         <div class="alert alert-warning update-banner shadow-sm mb-4 d-flex justify-content-between align-items-center">
             <div>
                 <i class="fas fa-sparkles text-warning me-2"></i>
-                <strong>New version available!</strong> Keep your SE tools up to date.
+                <strong>New version available!</strong> Keep your SE tools up to date with the latest features.
             </div>
             <form method="POST">
                 <button type="submit" name="action" value="self_update" class="btn btn-dark btn-sm fw-bold px-3">
@@ -237,7 +259,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
                 <div class="card tool-card card-strata p-4 text-center">
                     <div class="card-icon" style="color: var(--strata-color);"><i class="fas fa-fire-alt"></i></div>
                     <h5 class="fw-bold mb-2">PAN Firewall Mapper</h5>
-                    <p class="card-desc">Tool for mapping and migrating Firewall configurations.</p>
+                    <p class="card-desc">Tool for mapping and migrating Firewall configurations and rules.</p>
                     <a href="strata/panfirewallmapper/index.php" class="btn btn-strata w-100 fw-bold">Open Tool</a>
                 </div>
             </div>
@@ -253,7 +275,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
                     <div class="text-center">
                         <div class="card-icon" style="color: var(--cortex-color);"><i class="fas fa-box-open"></i></div>
                         <h5 class="fw-bold mb-2">Custom Content Importer</h5>
-                        <p class="card-desc">Import integrations and playbooks from GitHub.</p>
+                        <p class="card-desc">Import custom integrations, layouts, scripts, and playbooks into Cortex.</p>
                         <a href="cortex/contentimporter.php" class="btn btn-cortex w-100 fw-bold <?= !$hasToken ? 'disabled' : '' ?>">Open Tool</a>
                     </div>
                 </div>
@@ -263,7 +285,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
                 <div class="card tool-card card-cortex p-4 text-center">
                     <div class="card-icon" style="color: var(--cortex-color);"><i class="fas fa-clipboard-check"></i></div>
                     <h5 class="fw-bold mb-2">Cortex Health & Audit</h5>
-                    <p class="card-desc">Tenant BPA and Policy Audit tool.</p>
+                    <p class="card-desc">Review policies and profiles in use for XDR and XSIAM tenants (BPA/Health Check).</p>
                     <a href="cortex/cortexaudit.php" class="btn btn-cortex w-100 fw-bold">Open Tool</a>
                 </div>
             </div>
@@ -277,7 +299,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
                 <div class="card tool-card card-mgmt p-4 text-center">
                     <div class="card-icon" style="color: var(--mgmt-color);"><i class="fas fa-bullseye"></i></div>
                     <h5 class="fw-bold mb-2">PoV Radar</h5>
-                    <p class="card-desc">Track TRRs and PoV status globally.</p>
+                    <p class="card-desc">Track TRRs, PoV status, Global Timeline, and direct SFDC links.</p>
                     <a href="other/povradar.php" class="btn btn-dark w-100 fw-bold">Open Tracker</a>
                 </div>
             </div>
@@ -286,7 +308,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
 </div>
 
 <footer class="text-center py-4 text-muted small border-top mt-5">
-    <p class="mb-0">PANTools SE Edition | Connected to GitHub</p>
+    <p class="mb-0">PANTools SE Edition | Hybrid GitHub Connection</p>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

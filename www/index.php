@@ -213,13 +213,17 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
 <?php endif; ?>
 
 <nav class="navbar navbar-expand-lg navbar-light py-3">
-    <div class="container">
-        <a class="navbar-brand" href="#">
-            <span style="border-left: 2px solid #ddd; padding-left: 15px;">PANTools</span>
-            <a href="#" data-bs-toggle="modal" data-bs-target="#changelogModal" class="badge bg-light text-primary border ms-2 text-decoration-none" style="font-size: 0.65rem;" title="View Changelog">
+    <div class="container d-flex justify-content-between align-items-center">
+        
+        <div class="d-flex align-items-center">
+            <a class="navbar-brand m-0" href="#">
+                <span style="border-left: 2px solid #ddd; padding-left: 15px;">PANTools</span>
+            </a>
+            
+            <a href="#" data-bs-toggle="modal" data-bs-target="#changelogModal" class="badge bg-light text-primary border ms-2 text-decoration-none" style="font-size: 0.75rem; padding: 6px 12px;" title="View Changelog">
                 <i class="fas fa-code-branch me-1"></i><?= htmlspecialchars($latestVersionName) ?>.<?= htmlspecialchars($localHash) ?>
             </a>
-        </a>
+        </div>
         
         <div class="d-flex align-items-center gap-3">
             <?php if (!$hasToken): ?>
@@ -234,6 +238,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
                 </form>
             <?php endif; ?>
         </div>
+
     </div>
 </nav>
 

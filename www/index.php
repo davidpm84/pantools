@@ -8,6 +8,18 @@ $updateMessage = "";
 $updateError = false;
 $localHash = "Unknown";
 
+// --- LEER CHANGELOG Y VERSIÓN DINÁMICA ---
+$changelogData = [];
+$latestVersionName = "v1.0"; // Valor por defecto si no existe el fichero
+if (file_exists("$repoPath/versions.json")) {
+    $fileContent = file_get_contents("$repoPath/versions.json");
+    $parsed = json_decode($fileContent, true);
+    if (is_array($parsed) && !empty($parsed)) {
+        $changelogData = $parsed;
+        $latestVersionName = $changelogData[0]['version'] ?? "v1.0";
+    }
+}
+
 // A. INTENTO POR API DE GITHUB (Caché de 30 mins para no saturar la API)
 if (!isset($_SESSION['last_version_check']) || (time() - $_SESSION['last_version_check'] > 1800)) {
     $ch = curl_init("https://api.github.com/repos/davidpm84/pantools/commits/main");
@@ -204,9 +216,9 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
     <div class="container">
         <a class="navbar-brand" href="#">
             <span style="border-left: 2px solid #ddd; padding-left: 15px;">PANTools</span>
-            <span class="badge bg-light text-muted border ms-2" style="font-size: 0.6rem;" title="Current Version">
-                <i class="fas fa-code-branch me-1"></i>v1.0.<?= htmlspecialchars($localHash) ?>
-            </span>
+            <a href="#" data-bs-toggle="modal" data-bs-target="#changelogModal" class="badge bg-light text-primary border ms-2 text-decoration-none" style="font-size: 0.65rem;" title="View Changelog">
+                <i class="fas fa-code-branch me-1"></i><?= htmlspecialchars($latestVersionName) ?>.<?= htmlspecialchars($localHash) ?>
+            </a>
         </a>
         
         <div class="d-flex align-items-center gap-3">
@@ -235,7 +247,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
         <div class="alert alert-warning update-banner shadow-sm mb-4 d-flex justify-content-between align-items-center">
             <div>
                 <i class="fas fa-sparkles text-warning me-2"></i>
-                <strong>New version available!</strong> Keep your SE tools up to date with the latest features.
+                <strong>New version available!</strong> Keep your SE tools up to date.
             </div>
             <form method="POST">
                 <button type="submit" name="action" value="self_update" class="btn btn-dark btn-sm fw-bold px-3">
@@ -310,6 +322,51 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
 <footer class="text-center py-4 text-muted small border-top mt-5">
     <p class="mb-0">PANTools SE Edition</p>
 </footer>
+
+<div class="modal fade" id="changelogModal" tabindex="-1" aria-labelledby="changelogModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header bg-light">
+        <h5 class="modal-title fw-bold" id="changelogModalLabel">
+            <i class="fas fa-history text-primary me-2"></i> What's New in PANTools
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        
+        <?php if (empty($changelogData)): ?>
+            <p class="text-muted text-center">No changelog data found. Create 'versions.json' to track updates.</p>
+        <?php else: ?>
+            <div class="timeline">
+                <?php foreach ($changelogData as $index => $release): ?>
+                    <div class="mb-4 <?= $index === 0 ? '' : 'opacity-75' ?>">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h5 class="fw-bold text-dark mb-0">
+                                <?= htmlspecialchars($release['version']) ?>
+                                <?php if ($index === 0): ?><span class="badge bg-success ms-2" style="font-size:0.6rem;">LATEST</span><?php endif; ?>
+                            </h5>
+                            <span class="text-muted small"><i class="far fa-calendar-alt me-1"></i> <?= htmlspecialchars($release['date']) ?></span>
+                        </div>
+                        <ul class="text-muted small mb-0" style="padding-left: 20px;">
+                            <?php foreach ($release['features'] as $feature): ?>
+                                <li><?= htmlspecialchars($feature) ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                    <?php if ($index < count($changelogData) - 1): ?>
+                        <hr style="border-top: 1px dashed #ddd;">
+                    <?php endif; ?>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
+      </div>
+      <div class="modal-footer bg-light">
+        <button type="button" class="btn btn-secondary btn-sm fw-bold" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>

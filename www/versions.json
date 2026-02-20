@@ -1,0 +1,19 @@
+[
+  {
+    "version": "v1.0",
+    "date": "2026-02-20",
+    "features": [
+      "Added OTA Update System with direct GitHub Tarball download.",
+      "Fixed Setup Wizard skip button logic.",
+      "Redesigned sidebar for all Cortex tools to a compact 260px width."
+    ]
+  },
+  {
+    "version": "v0.9",
+    "date": "2026-02-18",
+    "features": [
+      "Introduced GitHub PAT integration for Content Importer.",
+      "Added smart logic to handle missing .git folders in Docker."
+    ]
+  }
+]

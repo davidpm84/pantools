@@ -205,7 +205,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
         <a class="navbar-brand" href="#">
             <span style="border-left: 2px solid #ddd; padding-left: 15px;">PANTools</span>
             <span class="badge bg-light text-muted border ms-2" style="font-size: 0.6rem;" title="Current Version">
-                <i class="fas fa-code-branch me-1"></i><?= htmlspecialchars($localHash) ?>
+                <i class="fas fa-code-branch me-1"></i>v1.0.<?= htmlspecialchars($localHash) ?>
             </span>
         </a>
         
@@ -259,7 +259,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
                 <div class="card tool-card card-strata p-4 text-center">
                     <div class="card-icon" style="color: var(--strata-color);"><i class="fas fa-fire-alt"></i></div>
                     <h5 class="fw-bold mb-2">PAN Firewall Mapper</h5>
-                    <p class="card-desc">Tool for mapping and migrating Firewall configurations and rules.</p>
+                    <p class="card-desc">Tool for mapping Firewall specs to the new Generation.</p>
                     <a href="strata/panfirewallmapper/index.php" class="btn btn-strata w-100 fw-bold">Open Tool</a>
                 </div>
             </div>
@@ -308,7 +308,7 @@ $showSetup = !$hasToken && !isset($_SESSION['setup_skipped']);
 </div>
 
 <footer class="text-center py-4 text-muted small border-top mt-5">
-    <p class="mb-0">PANTools SE Edition | Hybrid GitHub Connection</p>
+    <p class="mb-0">PANTools SE Edition</p>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

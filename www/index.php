@@ -57,38 +57,60 @@ if (isset($_SESSION['remote_hash']) && $localHash !== "Unknown" && $localHash !=
 
 // D. ACCIÓN DE ACTUALIZAR (Descarga directa del tar.gz desde GitHub)
 if (isset($_POST['action']) && $_POST['action'] === 'self_update' && isset($_SESSION['remote_hash'])) {
-    $tarUrl = "https://github.com/davidpm84/pantools/archive/refs/heads/main.tar.gz";
-    $tarFile = "/tmp/pantools_update.tar.gz";
+    $tarUrl      = "https://github.com/davidpm84/pantools/archive/refs/heads/main.tar.gz";
+    $tarFile     = "/tmp/pantools_update.tar.gz";
     $extractPath = "/tmp/pantools_extract";
 
-    // Descargar
-    exec("curl -L -s -o $tarFile " . escapeshellarg($tarUrl));
-    
-    // Descomprimir
-    exec("rm -rf $extractPath && mkdir -p $extractPath");
-    exec("tar -xzf $tarFile -C $extractPath 2>&1", $outTar, $retTar);
+    // Descargar (falla si no es 200)
+    $cmdDownload = "curl -fL -s -o " . escapeshellarg($tarFile) . " " . escapeshellarg($tarUrl) . " 2>&1";
+    exec($cmdDownload, $outDl, $retDl);
 
-    if ($retTar === 0) {
-        // Copiar SOLO el contenido de la carpeta 'www' hacia el contenedor
-        exec("cp -a $extractPath/pantools-main/www/. $repoPath/ 2>&1", $outCp, $retCp);
-
-        if ($retCp === 0) {
-            $localHash = $_SESSION['remote_hash'];
-            file_put_contents("$repoPath/.version", $localHash);
-            $updateMessage = "✅ PANTools successfully updated from GitHub!";
-            $updateAvailable = false;
-            header("Refresh:2"); 
-        } else {
-            $updateError = true;
-            $updateMessage = "❌ Copy failed: " . implode(" ", $outCp);
-        }
-    } else {
+    if ($retDl !== 0 || !file_exists($tarFile) || filesize($tarFile) < 1000) {
         $updateError = true;
-        $updateMessage = "❌ Unzip failed: " . implode(" ", $outTar);
+        $updateMessage = "❌ Download failed: " . implode(" ", $outDl);
+    } else {
+        // Preparar extracción
+        exec("rm -rf " . escapeshellarg($extractPath) . " && mkdir -p " . escapeshellarg($extractPath) . " 2>&1");
+
+        // Extraer
+        $cmdTar = "tar -xzf " . escapeshellarg($tarFile) . " -C " . escapeshellarg($extractPath) . " 2>&1";
+        exec($cmdTar, $outTar, $retTar);
+
+        if ($retTar !== 0) {
+            $updateError = true;
+            $updateMessage = "❌ Unzip failed: " . implode(" ", $outTar);
+        } else {
+            // Buscar el directorio 'www' dentro de lo extraído (sin asumir pantools-main)
+            $wwwCandidates = glob($extractPath . "/*/www", GLOB_ONLYDIR);
+
+            if (empty($wwwCandidates)) {
+                // Para ayudarte a depurar: lista lo que hay
+                $roots = glob($extractPath . "/*", GLOB_ONLYDIR);
+                $updateError = true;
+                $updateMessage = "❌ 'www' folder not found inside extracted archive. Found roots: " . implode(", ", $roots);
+            } else {
+                $srcWww = $wwwCandidates[0];
+
+                // Copiar SOLO el contenido de 'www' hacia /var/www/html
+                $cmdCp = "cp -a " . escapeshellarg($srcWww . "/.") . " " . escapeshellarg($repoPath . "/") . " 2>&1";
+                exec($cmdCp, $outCp, $retCp);
+
+                if ($retCp === 0) {
+                    $localHash = $_SESSION['remote_hash'];
+                    file_put_contents("$repoPath/.version", $localHash);
+                    $updateMessage = "✅ PANTools successfully updated from GitHub!";
+                    $updateAvailable = false;
+                    header("Refresh:2");
+                } else {
+                    $updateError = true;
+                    $updateMessage = "❌ Copy failed: " . implode(" ", $outCp);
+                }
+            }
+        }
     }
 
     // Limpiar temporales
-    exec("rm -rf $tarFile $extractPath");
+    exec("rm -rf " . escapeshellarg($tarFile) . " " . escapeshellarg($extractPath) . " 2>&1");
 }
 
 // --- 2. GESTIÓN DEL TOKEN (SETUP WIZARD) ---
